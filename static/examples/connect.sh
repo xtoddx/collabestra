@@ -11,36 +11,40 @@
 # $PATH.
 
 # OPTIONS
-# CHUCK_TO_SERVER: add to an existing chuck runtime
-# DONT_CHUCK: a chuck script referencing pad.ck is already in the chuck runtime
 # HOST: etherpad host, defaults to localhost:9001
 
 HOST=${HOST:-http://localhost:9001}
 
-while true
-do
-	wget -q ${HOST}/p/collexistra-chuck-pad/export/txt -O current_pad.ck
+echo "Starting chucK server"
+(chuck --server --loop)&
+sleep 1
 
-	# see if new pad compiles properly
-	COMPILE_ERRORS=`chuck --silent current_pad.ck 2>&1 | grep "\[current_pad.ck\]:line("`
+echo "Reading etherpads"
+while true; do
+	pad_list=`egrep '^{"key":"pad:.*-chuck-pad",' var/dirty.db | awk -F',' '{print $1}' | uniq | sed -e 's/^{"key":"pad://' -e 's/"$//'`
 
-	if [ -z "${COMPILE_ERRORS}" ]
-	then
-		echo "Machine.add(\"pad.ck\");" >> current_pad.ck
-		cp current_pad.ck pad.ck
-		if [ -z $DONT_CHUCK ] ; then
-			echo "Starting Chuck"
-			DONT_CHUCK=1
-			ADD=""
-			if [ ! -z $CHUCK_TO_SERVER ] ; then
-				echo "... to server"
-				ADD="+"
+	for pad in ${pad_list}; do
+		wget -q ${HOST}/p/${pad}/export/txt -O ${pad}.ck
+
+		# see if new pad compiles properly
+		COMPILE_ERRORS=`chuck --silent current_pad.ck 2>&1 |
+							grep "\[${pad}.ck\]:line("`
+
+		if [ -z "${COMPILE_ERRORS}" ]; then
+			echo "Machine.add(\"running_${pad}.ck\");" >> ${pad}.ck
+			should_run=""
+			if [ ! -f "running_${pad}.ck" ] ; then
+				echo "NO FILE == SHOULD RUN"
+				should_run="yes"
 			fi
-			chuck ${ADD} pad.ck
+			mv ${pad}.ck running_${pad}.ck
+			if [ ! -z "${should_run}" ] ; then
+				echo "ADDING: ${should_run}"
+				chuck + running_${pad}.ck
+			fi
+		else
+			echo "COMPILE_ERRORS=${COMPILE_ERRORS}"
 		fi
-	else
-		echo "COMPILE_ERRORS=${COMPILE_ERRORS}"
-	fi
+	done
 	sleep 1
 done
-
